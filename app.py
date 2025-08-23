@@ -1,95 +1,114 @@
-import os
+import io
 import torch
-from transformers import Blip2Processor, Blip2ForConditionalGeneration
 from PIL import Image
 import requests
-from bs4 import BeautifulSoup
+from transformers import VisionEncoderDecoderModel, ViTImageProcessor, AutoTokenizer
 import gradio as gr
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-print("🔄 Loading BLIP2 model... (this may take some time)")  # Load BLIP2 model
+print("Starting application...")
 
-processor = Blip2Processor.from_pretrained("Salesforce/blip2-flan-t5-xl")
-model = Blip2ForConditionalGeneration.from_pretrained(
-    "Salesforce/blip2-flan-t5-xl",
-    torch_dtype=torch.float32,
-    device_map="auto"   # accelerate handles CPU/GPU split
-)
+# Model Loading
+MODEL_ID = "nlpconnect/vit-gpt2-image-captioning"
 
-print("✅ Model loaded successfully with accelerate device_map")
+try:
+    print("Loading model...")
+    model = VisionEncoderDecoderModel.from_pretrained(MODEL_ID)
+    processor = ViTImageProcessor.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
-# -----------------------------
-# Google Search Helper
-# -----------------------------
-def google_search(query, num_results=3):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+    print(f"Model loaded successfully on device: {device}")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    raise
+
+def caption_image(image, max_length=16, num_beams=4):
+    """Generate caption for image."""
     try:
-        url = f"https://www.google.com/search?q={query}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        results = []
-        for g in soup.find_all("div", class_="BNeawe s3v9rd AP7Wnd")[:num_results]:
-            results.append(g.get_text())
-        return results if results else ["❌ No detailed info found"]
-    except Exception as e:
-        return [f"⚠️ Search error: {e}"]
-
-# -----------------------------
-# Memory-based Chat
-# -----------------------------
-chat_history = []  # stores (user, bot) messages
-
-def chatbot(user_input, image=None):
-    global chat_history
-
-    if image:
-        # If user uploaded an image → use BLIP2
-        try:
+        print("Processing image...")
+        if image.mode != "RGB":
             image = image.convert("RGB")
-            context = " ".join([f"User: {u} Bot: {b}" for u, b in chat_history[-5:]])  # last 5 turns
-            prompt = context + f" User asks: {user_input}"
-            inputs = processor(images=image, text=prompt, return_tensors="pt")
-            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
+            output_ids = model.generate(
+                pixel_values,
+                max_length=max_length,
+                num_beams=num_beams,
+                early_stopping=True
+            )
+        
+        caption = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+        print(f"Generated caption: {caption}")
+        return caption
+    except Exception as e:
+        error_msg = f"Error: {e}"
+        print(error_msg)
+        return error_msg
 
-            generated_ids = model.generate(**inputs, max_new_tokens=100)
-            answer = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+def caption_from_url(url, max_length=16, num_beams=4):
+    """Generate caption from URL."""
+    try:
+        print(f"Fetching image from URL: {url}")
+        resp = requests.get(url, timeout=30)
+        image = Image.open(io.BytesIO(resp.content))
+        return caption_image(image, max_length, num_beams)
+    except Exception as e:
+        error_msg = f"Error: {e}"
+        print(error_msg)
+        return error_msg
 
-            if answer.lower() in ["i don't know", "unknown", "not sure", ""]:
-                search_results = google_search(user_input)
-                answer += "\n\n🔍 Google says:\n" + "\n".join(search_results)
-        except Exception as e:
-            answer = f"⚠️ Error: {e}"
-    else:
-        # Text-only → do Google search
-        search_results = google_search(user_input)
-        answer = "🔍 Google says:\n" + "\n".join(search_results)
+# Simple Gradio Interface
+print("Creating Gradio interface...")
 
-    # Save to history
-    chat_history.append((user_input, answer))
-    return chat_history, chat_history
+with gr.Blocks(title="Image Captioning Test") as demo:
+    gr.Markdown("# Image Captioning Test")
+    
+    with gr.Tab("Upload"):
+        img = gr.Image(type="pil")
+        max_len_u = gr.Slider(8, 32, 16, label="Max Length")
+        beams_u = gr.Slider(1, 4, 2, label="Beams")
+        btn_u = gr.Button("Generate")
+        out_u = gr.Textbox(label="Caption")
+        btn_u.click(caption_image, [img, max_len_u, beams_u], out_u)
+    
+    with gr.Tab("URL"):
+        url = gr.Textbox(label="Image URL")
+        max_len = gr.Slider(8, 32, 16, label="Max Length")
+        beams = gr.Slider(1, 4, 2, label="Beams")
+        btn = gr.Button("Generate")
+        out = gr.Textbox(label="Caption")
+        btn.click(caption_from_url, [url, max_len, beams], out)
 
-# -----------------------------
-# Gradio UI with Chatbot
-# -----------------------------
-with gr.Blocks() as demo:
-    gr.Markdown("# 🤖 Smart Image + Text Chatbot with Memory")
+print("Interface created successfully")
 
-    chatbot_ui = gr.Chatbot(label="Conversation")
-    msg = gr.Textbox(label="Ask something")
-    img = gr.Image(type="pil", label="Optional: Upload an Image")
-    clear = gr.Button("Clear Chat")
-
-    def clear_history():
-        global chat_history
-        chat_history = []
-        return [], []
-
-    msg.submit(chatbot, inputs=[msg, img], outputs=[chatbot_ui, chatbot_ui])
-    clear.click(clear_history, outputs=[chatbot_ui, chatbot_ui])
-
-# -----------------------------
-# Run server
-# -----------------------------
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    print("Starting server...")
+    try:
+        # Test the model first
+        test_image = Image.new('RGB', (224, 224), color='red')
+        test_result = caption_image(test_image, max_length=8, num_beams=1)
+        print(f"Model test result: {test_result}")
+        
+        print("Launching Gradio...")
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=7860,
+            debug=True,
+            show_error=True
+        )
+    except KeyboardInterrupt:
+        print("Server stopped by user")
+    except Exception as e:
+        print(f"Server error: {e}")
+        import traceback
+        traceback.print_exc()
+        input("Press Enter to exit...")
+        
