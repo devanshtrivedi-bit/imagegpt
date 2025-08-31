@@ -1,6 +1,4 @@
-torch
 transformers
 pillow
-flask
-requests
-gradio
+torch
+
