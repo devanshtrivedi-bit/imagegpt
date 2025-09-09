@@ -32,6 +32,8 @@ model = AutoModelForImageClassification.from_pretrained("wambugu71/crop_leaf_dis
 # ---------------------------
 # Flask App
 # ---------------------------
+from flask import Flask, Response
+
 app = Flask(__name__)
 
 @app.route("/")
@@ -46,109 +48,222 @@ def index():
       <style>
         body {
           font-family: 'Segoe UI', sans-serif;
-          background: #f0fdf4;
+          background: linear-gradient(135deg, #064e3b, #166534, #22c55e);
           margin: 0; padding: 0;
-          display: flex; justify-content: center; align-items: center;
           min-height: 100vh;
-          transition: background 0.3s, color 0.3s;
+          display: flex; justify-content: center; align-items: center;
+          color: #f9fafb;
         }
-        body.dark { background: #1f2937; color: #e5e7eb; }
+
+        /* Glassmorphic Container */
         .container {
-          width: 100%; max-width: 700px;
-          background: white;
+          width: 100%; max-width: 950px;
+          background: rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(16px);
+          border-radius: 24px;
           padding: 2rem;
-          border-radius: 20px;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.1);
-          transition: background 0.3s, color 0.3s;
+          box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+          border: 1px solid rgba(255,255,255,0.2);
         }
-        body.dark .container { background: #111827; color: #f9fafb; }
-        h1 { color: #166534; text-align:center; margin-bottom: 1rem; }
-        body.dark h1 { color: #22c55e; }
-        .topbar { display:flex; justify-content:flex-end; margin-bottom:1rem; }
+
+        /* Navbar */
+        .topbar {
+          display:flex; justify-content:space-between; align-items:center;
+          margin-bottom: 2rem;
+        }
+        .logo {
+          font-size: 1.5rem;
+          font-weight: bold;
+          color: #22c55e;
+          text-shadow: 0 0 8px #22c55e;
+        }
         .toggle-btn {
-          background:none; border:none; font-size:1.5rem; cursor:pointer;
+          background:none; border:none; font-size:1.8rem; cursor:pointer;
+          color: #f9fafb;
         }
-        .upload-label {
-          background: #22c55e; color: white;
-          padding: 12px 20px; border-radius: 30px;
-          cursor: pointer; display:inline-block;
+
+        h1 {
           text-align:center;
-          transition: background 0.3s;
+          font-size: 2.2rem;
+          background: linear-gradient(90deg, #22c55e, #4ade80, #a7f3d0);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          margin-bottom: 0.5rem;
         }
-        .upload-label:hover { background: #15803d; }
+        .subtitle {
+          text-align:center;
+          font-size: 1.1rem;
+          color:#d1d5db;
+          margin-bottom: 2rem;
+        }
+
+        /* Upload Section */
+        .upload-section {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          margin: 1.5rem 0;
+          text-align: center;
+        }
+        .upload-box {
+          border: 2px dashed rgba(34,197,94,0.8);
+          border-radius: 20px;
+          padding: 2.5rem;
+          text-align: center;
+          cursor: pointer;
+          background: rgba(34,197,94,0.05);
+          transition: all 0.3s ease;
+          width: 100%;
+          max-width: 500px;
+        }
+        .upload-box:hover {
+          background: rgba(34,197,94,0.15);
+          transform: scale(1.02);
+          border-color:#4ade80;
+          box-shadow: 0 0 20px rgba(34,197,94,0.4);
+        }
         input[type=file] { display:none; }
-        img { margin-top:1rem; max-width:100%; border-radius:12px; }
-        .card {
-          margin-top: 1rem; padding:1rem;
-          border-radius:12px;
-          background:#f9fafb; border:1px solid #e5e7eb;
-          transition: background 0.3s, border 0.3s;
+        #preview {
+          margin-top:1rem;
+          max-width: 500px;
+          text-align: center;
         }
-        body.dark .card { background:#1f2937; border:1px solid #374151; }
+        .preview-img {
+          max-width: 300px;
+          border-radius:16px;
+          margin-top: 1rem;
+        }
+
+        /* Prediction Box */
+        #result {
+          width: 100%;
+          max-width: 500px;
+          text-align: center;
+        }
         .prediction {
-          background:#f0fdf4; border:1px solid #bbf7d0; color:#065f46;
+          background: rgba(16,185,129,0.1);
+          border:1px solid #10b981;
+          padding:1rem;
+          border-radius:16px;
+          margin-top:1rem;
+          color:#a7f3d0;
+          box-shadow: inset 0 0 20px rgba(16,185,129,0.3);
         }
-        body.dark .prediction { background:#064e3b; border:1px solid #047857; color:#a7f3d0; }
+
+        /* Chat Section */
+        .card {
+          margin-top: 2rem;
+          padding:1.5rem;
+          border-radius:20px;
+          background: rgba(255,255,255,0.05);
+          border:1px solid rgba(255,255,255,0.2);
+        }
+
+        .chat-box {
+          max-height:300px;
+          overflow-y:auto;
+          margin-top:1rem;
+          padding:0.5rem;
+        }
+        .chat-msg {
+          padding:10px 16px;
+          margin:10px 0;
+          border-radius:16px;
+          max-width:80%;
+          font-size:0.95rem;
+          animation: fadeIn 0.5s ease;
+        }
+        .chat-user {
+          background: linear-gradient(135deg, #22c55e, #16a34a);
+          color:white;
+          margin-left:auto;
+          text-align:right;
+          box-shadow:0 0 12px rgba(34,197,94,0.5);
+        }
+        .chat-bot {
+          background: rgba(255,255,255,0.15);
+          color:#f9fafb;
+          margin-right:auto;
+        }
+
+        @keyframes fadeIn {
+          from { opacity:0; transform:translateY(10px); }
+          to { opacity:1; transform:translateY(0); }
+        }
+
         .chat-input {
-          width:100%; padding:10px;
-          border:1px solid #ccc; border-radius:8px;
-          margin-top:0.5rem;
-          background:white;
-          transition: background 0.3s, color 0.3s, border 0.3s;
+          width:100%; padding:12px;
+          border-radius:12px;
+          border:none;
+          margin-top:0.8rem;
+          background: rgba(255,255,255,0.1);
+          color:white;
+          font-size:1rem;
         }
-        body.dark .chat-input { background:#374151; color:white; border:1px solid #4b5563; }
         .btn {
-          margin-top:0.5rem; padding:10px 20px;
-          border:none; border-radius:8px;
-          background:#22c55e; color:white; cursor:pointer;
-          transition: background 0.3s;
+          margin-top:1rem;
+          padding:12px 28px;
+          border:none; border-radius:12px;
+          background: linear-gradient(135deg, #22c55e, #4ade80);
+          color:white; cursor:pointer; font-size:1rem;
+          transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
-        .btn:hover { background:#15803d; }
+        .btn:hover {
+          transform: scale(1.05);
+          box-shadow: 0 0 20px rgba(34,197,94,0.6);
+        }
+
+        /* Footer */
         footer {
           margin-top: 2rem;
           text-align:center;
-          font-size: 0.9rem;
-          color: #6b7280;
+          font-size: 0.85rem;
+          color: #9ca3af;
         }
-        body.dark footer { color:#9ca3af; }
       </style>
     </head>
     <body>
       <div class="container">
+        <!-- Navbar -->
         <div class="topbar">
+          <div class="logo">🌾 KrishiSevak</div>
           <button id="mode-toggle" class="toggle-btn">🌙</button>
         </div>
-        <h1>🌱 Smart Crop Assistant</h1>
-        <p style="text-align:center; color:#374151;">Upload a crop leaf image to detect diseases and chat with the bot for advice.</p>
 
-        <!-- Image Upload -->
-        <div class="section">
-          <label for="file-upload" class="upload-label">📷 Upload Leaf Image</label>
-          <input id="file-upload" type="file" accept="image/*">
+        <h1>Smart Crop Assistant</h1>
+        <p class="subtitle">AI-Powered Farming • Disease Detection • Smart Chatbot</p>
+
+        <!-- Upload Section -->
+        <div class="upload-section">
+          <label for="file-upload" class="upload-box">
+            🌿 Drop your crop leaf image here or click to upload
+            <input id="file-upload" type="file" accept="image/*">
+          </label>
           <div id="preview"></div>
-          <div id="result" class="card prediction" style="display:none;"></div>
+          <div id="result" class="prediction" style="display:none;"></div>
         </div>
 
         <!-- Chatbot -->
-        <div class="section card">
-          <h3>💬 Chat with Crop Bot</h3>
-          <input id="chat-input" class="chat-input" placeholder="Ask about a crop or disease...">
+        <div class="card">
+          <h3>🤖 Ask Krishi Bot</h3>
+          <div id="chat-box" class="chat-box"></div>
+          <input id="chat-input" class="chat-input" placeholder="Type your farming question...">
           <button class="btn" onclick="askBot()">Send</button>
-          <div id="chat-response" style="margin-top:1rem;"></div>
         </div>
 
         <!-- Coming Soon -->
-        <div class="section card">
-          <h3>🚧 Coming Soon</h3>
+        <div class="card">
+          <h3>🔮 Future Features</h3>
           <ul>
-            <li>🌦 Weather-based alerts</li>
-            <li>📊 Market price tracking</li>
-            <li>🎤 Voice support for farmers</li>
-            <li>📝 Feedback collection</li>
+            <li>🌦 Real-time weather + disease alerts</li>
+            <li>📊 AI-based yield + price prediction</li>
+            <li>🎤 Voice-enabled farmer assistant</li>
+            <li>🛰 Satellite + IoT crop monitoring</li>
           </ul>
         </div>
 
-        <footer>© 2025 Krishi Sevak  | Built with ❤️ for Farmers by Team yantragya</footer>
+        <footer>© 2025 Krishi Sevak | Built with ⚡ Future Tech for Farmers (SIH)</footer>
       </div>
 
       <script>
@@ -170,7 +285,7 @@ def index():
 
           const reader = new FileReader();
           reader.onload = (e) => {
-            previewDiv.innerHTML = `<img src="${e.target.result}" alt="Leaf Preview">`;
+            previewDiv.innerHTML = `<img src="${e.target.result}" alt="Leaf Preview" class="preview-img">`;
           };
           reader.readAsDataURL(file);
 
@@ -195,13 +310,32 @@ def index():
             body: JSON.stringify({ query: query })
           });
           const data = await response.json();
-          document.getElementById("chat-response").innerText = data.response;
+
+          const chatBox = document.getElementById("chat-box");
+          chatBox.innerHTML += `<div class="chat-msg chat-user">${query}</div>`;
+
+          // Typing animation for bot
+          const botMsg = document.createElement("div");
+          botMsg.classList.add("chat-msg", "chat-bot");
+          chatBox.appendChild(botMsg);
+
+          let i = 0;
+          const text = data.response;
+          const typing = setInterval(() => {
+            botMsg.textContent = text.slice(0, i++);
+            if (i > text.length) clearInterval(typing);
+            chatBox.scrollTop = chatBox.scrollHeight;
+          }, 30);
+
+          document.getElementById("chat-input").value = "";
         }
       </script>
     </body>
     </html>
     """
     return Response(html, mimetype="text/html")
+
+
 
 # Prediction endpoint
 @app.route("/predict", methods=["POST"])
